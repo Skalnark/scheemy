@@ -13,10 +13,34 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 type Parser = Parsec Void Text
 
-test :: IO ()
-test = print "Parse"
+data Program = SToken 
+             | SIdentifier 
+             | SBoolean 
+             | SCharacter 
+             | SString 
+             | SNumber 
+             | SDelimiter 
+             | SintaticKeyword 
+             | ExpressionKeyword
+  deriving (Show)
 
--- Scheme parser
+program :: Parser Program
+program = do
+  _ <- optional interTokenSpace
+  choice 
+    [ SToken <$ pToken,
+      SDelimiter <$ delimiter,
+      SintaticKeyword <$ syntaticKeyword,
+      ExpressionKeyword <$ expressionKeyword
+    ]
+
+test :: Text -> IO ()
+test = parseTest (program <* eof)
+
+-- Scheme syntax
+
+pToken :: Parser Text
+pToken = identifier <|> boolean <|> character <|> stringElement <|> number <|> delimiter
 
 digit :: Parser Text
 digit = T.singleton <$> digitChar
@@ -50,13 +74,13 @@ identifier = try initial' <|> peculiarIdentifier
 comment :: Parser Text
 comment = do
   _ <- char ';'
-  _ <- manyTill anySingle eol
+  _ <- manyTill anySingle newline
   return ""
 
-type Whitespace = Text
-
 whitespace :: Parser Text
-whitespace = T.singleton <$> oneOf [' ', '\n']
+whitespace = do
+  _ <- oneOf [' ', '\t', '\n']
+  return ""
 
 atmosphere :: Parser Text
 atmosphere = whitespace <|> comment
@@ -67,7 +91,7 @@ interTokenSpace = many atmosphere
 
 delimiter :: Parser Text
 delimiter = choice
-  [ T.singleton <$ string " "
+  [ T.singleton <$> oneOf [' ', '(', ')', '"', ';']
   ]
 
 data SyntaticKeyword = Else | RightArrow | Define | Unquote | UnquoteSplicing
@@ -119,6 +143,54 @@ expressionKeyword =
       Quasiquote <$ string "quasiquote"
     ]
 
+
+variable :: Parser Text
+variable = identifier
+
+boolean :: Parser Text
+boolean = choice [string "#t", string "#f"]
+
+character :: Parser Text
+character = do
+  _ <- string "#\\"
+  choice
+    [ T.singleton <$> anySingle,
+      namedCharacter
+    ]
+  where
+    namedCharacter = choice
+      [ "space" <$ string "space",
+        "newline" <$ string "newline"
+      ]
+
+stringElement :: Parser Text
+stringElement = do
+  _ <- oneOf ['\\', '"']
+  choice
+    [ T.singleton <$> anySingle,
+      escapeSequence
+    ]
+  where
+    escapeSequence = do
+      _ <- char '\\'
+      choice
+        [ string "\\",
+          string "\""
+        ]
+
+number :: Parser Text
+number = choice
+  [ decimal,
+    octal,
+    hexadecimal,
+    binary
+  ]
+  where
+    decimal = digit10
+    octal = digit8
+    hexadecimal = digit16
+    binary = digit2
+
 digit2 :: Parser Text
 digit2 = T.singleton <$> oneOf ['0', '1']
 
@@ -128,5 +200,5 @@ digit8 = T.singleton <$> oneOf ['0' .. '7']
 digit10 :: Parser Text
 digit10 = digit
 
-digit16 :: Parser Char
-digit16 = oneOf ['0' .. '9'] <|> oneOf ['a' .. 'f'] <|> oneOf ['A' .. 'F']
+digit16 :: Parser Text
+digit16 = T.singleton <$> oneOf (['0' .. '9'] ++ ['a' .. 'f'] ++ ['A' .. 'F'])
